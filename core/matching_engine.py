@@ -34,6 +34,7 @@ __all__ = ["MatchingEngine", "Event", "EventType"]
 class EventType(Enum):
     ORDER_ADDED = "order_added"
     ORDER_CANCELLED = "order_cancelled"
+    ORDER_MODIFIED = "order_modified"
     ORDER_REJECTED = "order_rejected"
     TRADE_EXECUTED = "trade_executed"
     BOOK_UPDATED = "book_updated"
@@ -214,8 +215,63 @@ class MatchingEngine:
         return trades
 
     # ------------------------------------------------------------------
-    # Cancellations
+    # Cancellations & Modifications
     # ------------------------------------------------------------------
+
+    def modify_order(self, order_id: str, new_price: Optional[float] = None, new_qty: Optional[int] = None) -> List[Trade]:
+        if order_id not in self.book._order_index:
+            self._emit(EventType.ORDER_REJECTED, metadata={"reason": f"modify failed: {order_id} not found"})
+            return []
+            
+        side, current_price = self.book._order_index[order_id]
+        book_side = self.book._bids if side == OrderSide.BID else self.book._asks
+        level = book_side.get(current_price)
+        
+        if level is None:
+            return []
+            
+        order_to_modify = None
+        for o in level.orders:
+            if o.order_id == order_id:
+                order_to_modify = o
+                break
+                
+        if not order_to_modify:
+            return []
+            
+        # Fast path: purely a quantity reduction (keeps queue priority)
+        is_pure_reduction = (
+            (new_price is None or new_price == current_price) and 
+            (new_qty is not None and new_qty < order_to_modify.remaining_qty)
+        )
+        
+        if is_pure_reduction:
+            diff = order_to_modify.remaining_qty - new_qty
+            order_to_modify.quantity -= diff
+            order_to_modify.remaining_qty = new_qty
+            level._recalculate_qty()
+            self._emit(EventType.ORDER_MODIFIED, order=order_to_modify)
+            return []
+            
+        # Otherwise, cancel and replace (loses queue priority)
+        cancelled = self.book.cancel_order(order_id)
+        if not cancelled:
+            return []
+            
+        final_price = new_price if new_price is not None else current_price
+        final_qty = new_qty if new_qty is not None else cancelled.remaining_qty
+        
+        new_order = Order(
+            side=cancelled.side,
+            order_type=OrderType.LIMIT,
+            quantity=final_qty,
+            symbol=self.symbol,
+            price=final_price
+        )
+        new_order.order_id = cancelled.order_id  # Preserve original order ID
+        
+        self._emit(EventType.ORDER_MODIFIED, order=new_order)
+        return self.process(new_order)
 
     def _handle_cancel(self, order: Order) -> List[Trade]:
         """

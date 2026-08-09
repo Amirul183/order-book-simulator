@@ -158,3 +158,51 @@ def test_stats_returns_expected_keys(engine):
     s = engine.stats()
     for key in ("processed", "trades_executed", "avg_latency_ns", "throughput"):
         assert key in s
+
+
+# ------------------------------------------------------------------
+# Modifications
+# ------------------------------------------------------------------
+
+def test_modify_qty_reduction_keeps_priority(engine):
+    """Reducing quantity should keep the order's place in the FIFO queue."""
+    ask1 = limit(OrderSide.ASK, 100.0, 10)
+    ask2 = limit(OrderSide.ASK, 100.0, 10)
+    engine.process(ask1)
+    engine.process(ask2)
+
+    # Modify ask1 to 5 qty
+    trades = engine.modify_order(ask1.order_id, new_qty=5)
+    assert len(trades) == 0
+    assert engine.book.get_best_ask_level().total_qty == 15
+
+    # Buy 5. Should match against ask1 because it kept priority.
+    bid = limit(OrderSide.BID, 100.0, 5)
+    trades = engine.process(bid)
+    assert len(trades) == 1
+    assert trades[0].seller_order_id == ask1.order_id
+    assert engine.book.get_best_ask_level().total_qty == 10
+
+
+def test_modify_price_change_matches_immediately(engine):
+    """Changing an order's price might cause it to cross the spread and match."""
+    engine.process(limit(OrderSide.BID, 100.0, 10))
+    ask = limit(OrderSide.ASK, 105.0, 10)
+    engine.process(ask)
+
+    # Modify ask price down to 99.0
+    trades = engine.modify_order(ask.order_id, new_price=99.0)
+    
+    assert len(trades) == 1
+    assert trades[0].price == 100.0
+    assert trades[0].quantity == 10
+    assert trades[0].seller_order_id == ask.order_id
+    
+    assert engine.book.best_bid() is None
+    assert engine.book.best_ask() is None
+
+
+def test_modify_nonexistent_order(engine):
+    """Attempting to modify an order that doesn't exist returns empty trades."""
+    trades = engine.modify_order("fake_id", new_price=100.0)
+    assert trades == []

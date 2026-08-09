@@ -89,6 +89,17 @@ class OrderRequest(BaseModel):
         return v.upper()
 
 
+class ModifyRequest(BaseModel):
+    quantity: Optional[int] = Field(None, gt=0, description="new order size (must be > 0)")
+    price: Optional[float] = Field(None, description="new price for the order")
+    symbol: str = Field("AAPL", description="instrument symbol")
+
+    @field_validator("symbol")
+    @classmethod
+    def normalise_symbol(cls, v: str) -> str:
+        return v.upper()
+
+
 class OrderResponse(BaseModel):
     order_id: str
     status: str
@@ -150,6 +161,30 @@ def cancel_order(order_id: str, symbol: str = "AAPL"):
             detail=f"order '{order_id}' not found or already filled",
         )
     return {"cancelled": order_id, "status": "cancelled"}
+
+
+@router.put("/order/{order_id}")
+def modify_order(order_id: str, req: ModifyRequest):
+    engine = get_engine_for_symbol(req.symbol)
+    
+    if order_id not in engine.book._order_index:
+        raise HTTPException(
+            status_code=404,
+            detail=f"order '{order_id}' not found or already filled",
+        )
+        
+    trades = engine.modify_order(
+        order_id=order_id,
+        new_price=req.price,
+        new_qty=req.quantity
+    )
+    
+    return {
+        "order_id": order_id,
+        "status": "modified",
+        "trades_executed": len(trades),
+        "message": f"order modified — {len(trades)} trade(s) executed from new matching"
+    }
 
 
 @router.get("/orderbook")
