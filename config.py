@@ -1,6 +1,6 @@
 # config.py
-# Central place for all the knobs you might want to tweak.
-# Keeping this separate so the matching engine doesn't have magic numbers buried in it.
+# Central configuration file for all application settings.
+# Keeps configuration separate from the matching engine to avoid hardcoding numbers.
 
 SYMBOL = "AAPL"          # default instrument
 TICK_SIZE = 0.01         # minimum price increment
