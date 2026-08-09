@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Order Book Simulator — Live Terminal</title>
+  <meta name="description" content="High-performance in-memory order book simulator with real-time WebSocket streaming, price-time priority matching, and a live trading terminal dashboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ================================================================
+       TOKENS
+    ================================================================ */
+    :root {
+      --bg:         #0c0c0e;
+      --bg-panel:   #111115;
+      --bg-card:    #16161a;
+      --bg-raised:  #1c1c22;
+      --bg-input:   #131317;
+
+      --border:     #252530;
+      --border-md:  #2e2e3c;
+
+      --bid:        #00e676;
+      --bid-bg:     rgba(0,230,118,0.08);
+      --bid-glow:   rgba(0,230,118,0.2);
+      --ask:        #ff3d5e;
+      --ask-bg:     rgba(255,61,94,0.08);
+      --ask-glow:   rgba(255,61,94,0.2);
+
+      --accent:     #3d8eff;
+      --accent-bg:  rgba(61,142,255,0.10);
+      --amber:      #ffb700;
+      --amber-bg:   rgba(255,183,0,0.10);
+      --purple:     #9d4edd;
+
+      --t1: #e8e8f0;   /* primary text */
+      --t2: #7a7a90;   /* secondary */
+      --t3: #454560;   /* muted */
+
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --ui:   'Inter', system-ui, sans-serif;
+      --r:    6px;
+      --trans: 140ms ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: var(--ui);
+      background: var(--bg);
+      color: var(--t1);
+      display: flex;
+      flex-direction: column;
+    }
+    select, input, button { font-family: inherit; }
+
+    /* ================================================================
+       NAV BAR
+    ================================================================ */
+    .nav {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 0 20px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .brand-icon {
+      width: 30px; height: 30px;
+      background: linear-gradient(135deg, #3d8eff 0%, #9d4edd 100%);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+    .brand-name {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+
+    .sep { width: 1px; height: 28px; background: var(--border); flex-shrink: 0; }
+
+    .sym-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sym-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--t3);
+    }
+    .sym-select {
+      appearance: none;
+      background: var(--bg-card);
+      border: 1px solid var(--border-md);
+      border-radius: var(--r);
+      color: var(--t1);
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 5px 28px 5px 10px;
+      cursor: pointer;
+      outline: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a7a90'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 9px center;
+      transition: border-color var(--trans);
+    }
+    .sym-select:hover, .sym-select:focus { border-color: var(--accent); }
+
+    .nav-price {
+      font-family: var(--mono);
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      transition: color var(--trans);
+    }
+    .nav-price.up   { color: var(--bid); }
+    .nav-price.down { color: var(--ask); }
+
+    .nav-delta {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+    .nav-delta.up   { background: var(--bid-bg); color: var(--bid); }
+    .nav-delta.down { background: var(--ask-bg); color: var(--ask); }
+
+    .spacer { flex: 1; }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border-md);
+      background: var(--bg-card);
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--t3);
+      transition: background var(--trans), box-shadow var(--trans);
+    }
+    .status-dot.live { background: var(--bid); box-shadow: 0 0 8px var(--bid-glow); animation: pulse 2s ease infinite; }
+    .status-dot.dead { background: var(--ask); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    .status-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--t2);
+    }
+
+    .clock {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--t3);
+    }
+
+    /* ================================================================
+       LAYOUT
+    ================================================================ */
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 300px 1fr 260px;
+      grid-template-rows: 1fr 180px;
+      gap: 1px;
+      background: var(--border);
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .pane {
+      background: var(--bg-panel);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .pane-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px 9px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .pane-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--t3);
+    }
+    .pane-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 3px;
+      background: var(--bg-card);
+      color: var(--t2);
+      border: 1px solid var(--border);
+    }
+    .pane-badge.live { color: var(--bid); border-color: rgba(0,230,118,0.25); animation: pulse 2s ease infinite; }
+
+    /* ================================================================
+       LEFT — ORDER BOOK
+    ================================================================ */
+    .book-pane { grid-column: 1; grid-row: 1; }
+
+    .book-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      padding: 6px 14px 5px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .col-hdr {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--t3);
+    }
+    .col-hdr:nth-child(2) { text-align: center; }
+    .col-hdr:nth-child(3) { text-align: right; }
+
+    .asks-wrap, .bids-wrap {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .asks-wrap { flex-direction: column-reverse; }
+
+    .book-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      padding: 3.5px 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      position: relative;
+      cursor: default;
+    }
+    /* volume depth bar behind each row */
+    .book-row::after {
+      content: '';
+      position: absolute;
+      right: 0; top: 0;
+      height: 100%;
+      width: var(--depth, 0%);
+      pointer-events: none;
+      border-radius: 2px 0 0 2px;
+      transition: width 0.35s ease;
+    }
+    .ask-row::after { background: var(--ask-bg); }
+    .bid-row::after { background: var(--bid-bg); }
+
+    .book-row .r-price { font-weight: 600; }
+    .ask-row .r-price  { color: var(--ask); }
+    .bid-row .r-price  { color: var(--bid); }
+    .book-row .r-qty   { color: var(--t2); text-align: center; }
+    .book-row .r-tot   { color: var(--t3); text-align: right; }
+
+    .flash-bid { animation: fbid 0.35s ease; }
+    .flash-ask { animation: fask 0.35s ease; }
+    @keyframes fbid { 0%{background:rgba(0,230,118,.18)} 100%{background:transparent} }
+    @keyframes fask { 0%{background:rgba(255,61,94,.18)}  100%{background:transparent} }
+
+    .spread-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 7px 14px;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .spread-lbl { font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--t3); text-transform: uppercase; }
+    .spread-val { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--amber); }
+
+    /* ================================================================
+       CENTER — STATS
+    ================================================================ */
+    .center-pane { grid-column: 2; grid-row: 1; }
+
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .kpi {
+      background: var(--bg-card);
+      padding: 16px 18px 14px;
+    }
+    .kpi-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--t3);
+      margin-bottom: 6px;
+    }
+    .kpi-value {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      color: var(--t1);
+      line-height: 1;
+    }
+    .kpi-sub {
+      font-size: 10px;
+      color: var(--t3);
+      margin-top: 4px;
+      font-family: var(--mono);
+    }
+
+    /* Imbalance */
+    .imb-section {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .imb-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 9px;
+    }
+    .imb-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--t3); }
+    .imb-value { font-family: var(--mono); font-size: 16px; font-weight: 700; transition: color var(--trans); }
+    .imb-track {
+      height: 8px;
+      background: var(--bg-raised);
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+    }
+    .imb-bid { height: 100%; background: var(--bid); border-radius: 4px 0 0 4px; transition: width 0.5s ease; }
+    .imb-ask { height: 100%; background: var(--ask); border-radius: 0 4px 4px 0; transition: width 0.5s ease; }
+    .imb-tags {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+    .imb-tag-bid { font-size: 9px; font-weight: 700; color: var(--bid); letter-spacing: 0.8px; }
+    .imb-tag-ask { font-size: 9px; font-weight: 700; color: var(--ask); letter-spacing: 0.8px; }
+
+    /* Latency cards */
+    .lat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .lat-card {
+      background: var(--bg-card);
+      padding: 12px 16px;
+    }
+    .lat-lbl { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--t3); margin-bottom: 5px; }
+    .lat-val {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .lat-unit { font-size: 10px; font-weight: 500; color: var(--t3); margin-left: 2px; }
+
+    /* Best B/A/Spread */
+    .bba-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .bba-card {
+      background: var(--bg-card);
+      padding: 13px 18px;
+    }
+    .bba-lbl { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--t3); margin-bottom: 5px; }
+    .bba-val {
+      font-family: var(--mono);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    /* ================================================================
+       RIGHT — TRADE TAPE
+    ================================================================ */
+    .tape-pane { grid-column: 3; grid-row: 1; }
+
+    .tape-body {
+      flex: 1;
+      overflow-y: auto;
+    }
+    .tape-body::-webkit-scrollbar { width: 3px; }
+    .tape-body::-webkit-scrollbar-track { background: transparent; }
+    .tape-body::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 2px; }
+
+    .tape-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      padding: 5px 14px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      border-bottom: 1px solid rgba(255,255,255,0.025);
+      transition: background var(--trans);
+    }
+    .tape-row:hover { background: var(--bg-raised); }
+    .tape-row.new-entry { animation: slideIn 0.2s ease; }
+    @keyframes slideIn { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:none} }
+
+    .tr-price { font-weight: 700; }
+    .tr-price.buy  { color: var(--bid); }
+    .tr-price.sell { color: var(--ask); }
+    .tr-qty { color: var(--t2); text-align: center; }
+    .tr-val { color: var(--t3); text-align: right; }
+
+    .tape-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 20px;
+    }
+    .tape-empty-icon { font-size: 32px; opacity: 0.3; }
+    .tape-empty-text { font-size: 12px; color: var(--t3); font-weight: 500; text-align: center; }
+
+    /* ================================================================
+       BOTTOM — ORDER FORM
+    ================================================================ */
+    .form-pane {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      background: var(--bg-panel);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 24px;
+      overflow: hidden;
+    }
+
+    .form-section {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--t3);
+      white-space: nowrap;
+    }
+
+    .toggle-group {
+      display: flex;
+      border-radius: var(--r);
+      overflow: hidden;
+      border: 1px solid var(--border-md);
+    }
+    .tog-btn {
+      padding: 9px 20px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      cursor: pointer;
+      border: none;
+      background: var(--bg-card);
+      color: var(--t3);
+      transition: all var(--trans);
+    }
+    .tog-btn:hover:not(.on) { background: var(--bg-raised); color: var(--t1); }
+    .tog-btn.bid.on { background: var(--bid-bg); color: var(--bid); }
+    .tog-btn.ask.on { background: var(--ask-bg); color: var(--ask); }
+    .tog-btn.neu.on { background: var(--accent-bg); color: var(--accent); }
+
+    .vdiv { width: 1px; height: 44px; background: var(--border); flex-shrink: 0; }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .field label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--t3);
+    }
+    .fin {
+      background: var(--bg-input);
+      border: 1px solid var(--border-md);
+      border-radius: var(--r);
+      color: var(--t1);
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 600;
+      padding: 8px 12px;
+      width: 140px;
+      outline: none;
+      transition: border-color var(--trans), box-shadow var(--trans);
+    }
+    .fin:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+    .fin:disabled { opacity: 0.3; cursor: not-allowed; }
+    .fin::placeholder { color: var(--t3); }
+
+    .submit {
+      padding: 10px 32px;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border: none;
+      border-radius: var(--r);
+      cursor: pointer;
+      transition: all var(--trans);
+      white-space: nowrap;
+    }
+    .submit.bid-s { background: var(--bid); color: #000; }
+    .submit.ask-s { background: var(--ask); color: #fff; }
+    .submit:hover { filter: brightness(1.12); transform: translateY(-1px); box-shadow: 0 5px 20px var(--bid-glow); }
+    .submit.ask-s:hover { box-shadow: 0 5px 20px var(--ask-glow); }
+    .submit:active { transform: none; }
+
+    .feedback {
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 8px 14px;
+      border-radius: var(--r);
+      max-width: 340px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      line-height: 1.4;
+    }
+    .feedback.show { opacity: 1; }
+    .feedback.ok  { background: var(--bid-bg); color: var(--bid); border: 1px solid rgba(0,230,118,.2); }
+    .feedback.err { background: var(--ask-bg); color: var(--ask); border: 1px solid rgba(255,61,94,.2); }
+  </style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav class="nav">
+  <div class="brand">
+    <div class="brand-icon">📈</div>
+    <span class="brand-name">Order Book Simulator</span>
+  </div>
+  <div class="sep"></div>
+  <div class="sym-wrap">
+    <span class="sym-label">Symbol</span>
+    <select class="sym-select" id="symSel">
+      <option value="AAPL">AAPL</option>
+      <option value="TSLA">TSLA</option>
+      <option value="NVDA">NVDA</option>
+      <option value="BTC-USD">BTC-USD</option>
+    </select>
+  </div>
+  <div id="navPrice" class="nav-price">—</div>
+  <div id="navDelta" class="nav-delta"></div>
+  <div class="spacer"></div>
+  <div class="status-pill">
+    <div class="status-dot" id="sDot"></div>
+    <span class="status-label" id="sLabel">Connecting…</span>
+  </div>
+  <span class="clock" id="clock"></span>
+</nav>
+
+<!-- ── WORKSPACE ── -->
+<div class="workspace">
+
+  <!-- LEFT: ORDER BOOK -->
+  <div class="pane book-pane">
+    <div class="pane-head">
+      <span class="pane-title">Order Book</span>
+      <span class="pane-badge live" id="bookBadge">● LIVE</span>
+    </div>
+    <div class="book-cols">
+      <span class="col-hdr">Price</span>
+      <span class="col-hdr">Qty</span>
+      <span class="col-hdr">Total</span>
+    </div>
+    <div class="asks-wrap" id="asksWrap"></div>
+    <div class="spread-row">
+      <span class="spread-lbl">Spread</span>
+      <span class="spread-val" id="sSpread">—</span>
+      <span class="spread-lbl">Mid</span>
+      <span class="spread-val" id="sMid">—</span>
+    </div>
+    <div class="bids-wrap" id="bidsWrap"></div>
+  </div>
+
+  <!-- CENTER: STATS -->
+  <div class="pane center-pane">
+    <div class="pane-head">
+      <span class="pane-title">Engine Stats</span>
+      <span class="pane-badge" id="symbolTag">AAPL</span>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-label">Throughput</div>
+        <div class="kpi-value" id="kThroughput">—</div>
+        <div class="kpi-sub">orders / sec</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Trades</div>
+        <div class="kpi-value" id="kTrades">—</div>
+        <div class="kpi-sub">executed</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Processed</div>
+        <div class="kpi-value" id="kProcessed">—</div>
+        <div class="kpi-sub">total orders</div>
+      </div>
+    </div>
+
+    <div class="imb-section">
+      <div class="imb-head">
+        <span class="imb-title">Order Flow Imbalance</span>
+        <span class="imb-value" id="imbVal">—</span>
+      </div>
+      <div class="imb-track">
+        <div class="imb-bid" id="imbBid" style="width:50%"></div>
+        <div class="imb-ask" id="imbAsk" style="width:50%"></div>
+      </div>
+      <div class="imb-tags">
+        <span class="imb-tag-bid">▲ Bid Pressure</span>
+        <span class="imb-tag-ask">Ask Pressure ▼</span>
+      </div>
+    </div>
+
+    <div class="lat-row">
+      <div class="lat-card">
+        <div class="lat-lbl">Avg</div>
+        <div class="lat-val" id="lAvg">—</div>
+      </div>
+      <div class="lat-card">
+        <div class="lat-lbl">P50</div>
+        <div class="lat-val" id="lP50">—</div>
+      </div>
+      <div class="lat-card">
+        <div class="lat-lbl">P95</div>
+        <div class="lat-val" id="lP95">—</div>
+      </div>
+      <div class="lat-card">
+        <div class="lat-lbl">P99</div>
+        <div class="lat-val" id="lP99">—</div>
+      </div>
+    </div>
+
+    <div class="bba-row">
+      <div class="bba-card">
+        <div class="bba-lbl">Best Bid</div>
+        <div class="bba-val" id="bBid" style="color:var(--bid)">—</div>
+      </div>
+      <div class="bba-card">
+        <div class="bba-lbl">Best Ask</div>
+        <div class="bba-val" id="bAsk" style="color:var(--ask)">—</div>
+      </div>
+      <div class="bba-card">
+        <div class="bba-lbl">Spread</div>
+        <div class="bba-val" id="bSpread" style="color:var(--amber)">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: TRADE TAPE -->
+  <div class="pane tape-pane">
+    <div class="pane-head">
+      <span class="pane-title">Trade Tape</span>
+      <span class="pane-badge" id="tapeBadge">0 trades</span>
+    </div>
+    <div class="book-cols">
+      <span class="col-hdr">Price</span>
+      <span class="col-hdr">Qty</span>
+      <span class="col-hdr">Value</span>
+    </div>
+    <div class="tape-body" id="tapeBody">
+      <div class="tape-empty" id="tapeEmpty">
+        <div class="tape-empty-icon">⏳</div>
+        <div class="tape-empty-text">Loading recent trades…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: ORDER FORM -->
+  <div class="form-pane">
+    <span class="form-section">New Order</span>
+
+    <div class="toggle-group">
+      <button class="tog-btn bid on" id="tBid" onclick="setSide('bid')">Buy</button>
+      <button class="tog-btn ask"    id="tAsk" onclick="setSide('ask')">Sell</button>
+    </div>
+
+    <div class="toggle-group">
+      <button class="tog-btn neu on" id="tLimit"  onclick="setType('limit')">Limit</button>
+      <button class="tog-btn neu"    id="tMarket" onclick="setType('market')">Market</button>
+    </div>
+
+    <div class="vdiv"></div>
+
+    <div class="field">
+      <label for="fPrice">Price</label>
+      <input id="fPrice" class="fin" type="number" step="0.01" min="0.01" placeholder="100.00" />
+    </div>
+
+    <div class="field">
+      <label for="fQty">Quantity</label>
+      <input id="fQty" class="fin" type="number" step="1" min="1" placeholder="100" />
+    </div>
+
+    <button class="submit bid-s" id="submitBtn" onclick="placeOrder()">
+      Place Buy Order
+    </button>
+
+    <div class="vdiv"></div>
+
+    <div class="feedback" id="fb"></div>
+  </div>
+
+</div>
+
+<script>
+/* ── STATE ── */
+let ws = null, sym = 'AAPL', side = 'bid', otype = 'limit';
+let lastMid = null, tapeCount = 0, retry = 1000;
+let lastBestBid = null, lastBestAsk = null;
+const MAX_TAPE = 80;
+
+/* ── WS ── */
+function connect(symbol) {
+  if (ws) { try { ws.close(); } catch(_){} ws = null; }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  setStatus('connecting');
+  ws = new WebSocket(`${proto}://${location.host}/ws/${symbol}`);
+  ws.onopen = () => { setStatus('live'); retry = 1000; };
+  ws.onmessage = e => {
+    try {
+      const f = JSON.parse(e.data);
+      if (f.type === 'snapshot') onSnapshot(f);
+      else if (f.type === 'trade') onTrade(f);
+    } catch(_) {}
+  };
+  ws.onerror = () => setStatus('dead');
+  ws.onclose = () => {
+    setStatus('dead');
+    setTimeout(() => { if (sym === symbol) connect(symbol); }, retry);
+    retry = Math.min(retry * 2, 12000);
+  };
+}
+
+/* ── HANDLERS ── */
+function onSnapshot(f) {
+  renderBook(f.bids, f.asks);
+  updatePrice(f.mid_price);
+  set('sSpread', fmtP(f.spread));
+  set('sMid',    fmtP(f.mid_price));
+  updateImb(f.imbalance);
+  if (f.stats) updateStats(f.stats);
+  if (f.best_bid) lastBestBid = f.best_bid;
+  if (f.best_ask) lastBestAsk = f.best_ask;
+  // pre-populate tape from welcome snapshot
+  if (f.recent_trades && f.recent_trades.length > 0) {
+    const empty = document.getElementById('tapeEmpty');
+    if (empty) empty.remove();
+    f.recent_trades.forEach(t => appendTapeRow(t, false));
+    tapeCount = f.recent_trades.length;
+    set('tapeBadge', `${tapeCount} trades`);
+  }
+}
+
+function onTrade(f) {
+  const empty = document.getElementById('tapeEmpty');
+  if (empty) empty.remove();
+  appendTapeRow(f, true);
+  tapeCount++;
+  set('tapeBadge', `${tapeCount} trades`);
+}
+
+/* ── BOOK RENDER ── */
+const N = 10;
+
+function renderBook(bids, asks) {
+  renderSide('bidsWrap', bids.slice(0, N), false);
+  renderSide('asksWrap', asks.slice(0, N), true);
+}
+
+function renderSide(id, levels, isAsk) {
+  const wrap = document.getElementById(id);
+  const cls  = isAsk ? 'ask-row' : 'bid-row';
+  const fl   = isAsk ? 'flash-ask' : 'flash-bid';
+
+  let cum = 0;
+  const rows = levels.map(([p, q]) => { cum += q; return { p, q, cum }; });
+  const maxCum = cum || 1;
+  const display = isAsk ? [...rows].reverse() : rows;
+
+  const existing = wrap.querySelectorAll('.book-row');
+  display.forEach((item, i) => {
+    let row = existing[i];
+    if (!row) {
+      row = document.createElement('div');
+      row.className = `book-row ${cls}`;
+      wrap.appendChild(row);
+    }
+    const pf = fmtP(item.p);
+    const qf = item.q.toLocaleString();
+    if (row.dataset.p !== pf || row.dataset.q !== qf) {
+      if (existing[i]) {
+        row.classList.remove(fl);
+        void row.offsetWidth;
+        row.classList.add(fl);
+      }
+      row.innerHTML = `<span class="r-price">${pf}</span><span class="r-qty">${qf}</span><span class="r-tot">${item.cum.toLocaleString()}</span>`;
+      row.dataset.p = pf; row.dataset.q = qf;
+    }
+    row.style.setProperty('--depth', Math.round(item.cum / maxCum * 100) + '%');
+  });
+  for (let i = display.length; i < existing.length; i++) existing[i].remove();
+}
+
+/* ── TAPE ── */
+function appendTapeRow(trade, isNew) {
+  const body = document.getElementById('tapeBody');
+  // determine direction: if price >= best_ask it's a buy aggressor
+  const isBuy = lastBestAsk !== null ? trade.price >= lastBestAsk : trade.price > (lastBestBid || 0);
+  const row = document.createElement('div');
+  row.className = 'tape-row' + (isNew ? ' new-entry' : '');
+  const val = trade.value >= 1000000
+    ? (trade.value/1000000).toFixed(2) + 'M'
+    : trade.value >= 1000
+    ? (trade.value/1000).toFixed(1) + 'k'
+    : trade.value.toFixed(0);
+  row.innerHTML =
+    `<span class="tr-price ${isBuy ? 'buy' : 'sell'}">${fmtP(trade.price)}</span>` +
+    `<span class="tr-qty">${trade.quantity.toLocaleString()}</span>` +
+    `<span class="tr-val">$${val}</span>`;
+  if (isNew) body.insertBefore(row, body.firstChild);
+  else body.appendChild(row);
+  const rows = body.querySelectorAll('.tape-row');
+  if (rows.length > MAX_TAPE) rows[rows.length - 1].remove();
+}
+
+/* ── PRICE / STATS / IMB ── */
+function updatePrice(mid) {
+  if (!mid) return;
+  const el = document.getElementById('navPrice');
+  const de = document.getElementById('navDelta');
+  if (lastMid !== null && Math.abs(mid - lastMid) > 0.0001) {
+    const d = mid - lastMid, up = d > 0;
+    const pct = ((d / lastMid) * 100).toFixed(3);
+    el.className = `nav-price ${up ? 'up' : 'down'}`;
+    de.className = `nav-delta ${up ? 'up' : 'down'}`;
+    de.textContent = `${up?'+':''}${d.toFixed(2)} (${up?'+':''}${pct}%)`;
+  }
+  el.textContent = fmtP(mid);
+  lastMid = mid;
+}
+
+function updateStats(s) {
+  // parse throughput — strip " orders/sec" then format with commas
+  let thr = '—';
+  if (s.throughput && s.throughput !== 'N/A') {
+    const n = parseFloat(s.throughput.replace(/[^0-9.]/g, ''));
+    thr = n >= 1000 ? Math.round(n).toLocaleString() : n.toFixed(0);
+  }
+  set('kThroughput', thr);
+  set('kTrades',    s.trades_executed?.toLocaleString() ?? '—');
+  set('kProcessed', s.processed?.toLocaleString() ?? '—');
+  set('bBid',   s.best_bid  != null ? fmtP(s.best_bid)  : '—');
+  set('bAsk',   s.best_ask  != null ? fmtP(s.best_ask)  : '—');
+  set('bSpread',s.spread     != null ? fmtP(s.spread)    : '—');
+  set('lAvg', fmtNs(s.avg_latency_ns));
+  set('lP50', fmtNs(s.p50_ns));
+  set('lP95', fmtNs(s.p95_ns));
+  set('lP99', fmtNs(s.p99_ns));
+}
+
+function updateImb(imb) {
+  if (imb == null) return;
+  const bidPct = Math.round((imb + 1) / 2 * 100);
+  document.getElementById('imbBid').style.width = bidPct + '%';
+  document.getElementById('imbAsk').style.width = (100 - bidPct) + '%';
+  const el = document.getElementById('imbVal');
+  el.textContent = (imb >= 0 ? '+' : '') + imb.toFixed(3);
+  el.style.color = imb > 0.05 ? 'var(--bid)' : imb < -0.05 ? 'var(--ask)' : 'var(--t2)';
+}
+
+/* ── STATUS ── */
+function setStatus(state) {
+  document.getElementById('sDot').className = `status-dot ${state}`;
+  document.getElementById('sLabel').textContent = {live:'Live', connecting:'Connecting…', dead:'Disconnected'}[state] || state;
+}
+
+/* ── FORM ── */
+function setSide(s) {
+  side = s;
+  document.getElementById('tBid').classList.toggle('on', s==='bid');
+  document.getElementById('tAsk').classList.toggle('on', s==='ask');
+  const btn = document.getElementById('submitBtn');
+  btn.className = `submit ${s==='bid' ? 'bid-s' : 'ask-s'}`;
+  btn.textContent = s==='bid' ? 'Place Buy Order' : 'Place Sell Order';
+}
+
+function setType(t) {
+  otype = t;
+  document.getElementById('tLimit').classList.toggle('on',  t==='limit');
+  document.getElementById('tMarket').classList.toggle('on', t==='market');
+  document.getElementById('fPrice').disabled = (t==='market');
+}
+
+async function placeOrder() {
+  const price = otype==='limit' ? parseFloat(document.getElementById('fPrice').value) : null;
+  const qty   = parseInt(document.getElementById('fQty').value);
+  if (!qty || qty <= 0)                               return showFB('Quantity must be > 0', 'err');
+  if (otype==='limit' && (!price || price <= 0))      return showFB('Price required for limit orders', 'err');
+
+  const body = { side, order_type: otype, quantity: qty, symbol: sym };
+  if (price) body.price = price;
+
+  try {
+    const res  = await fetch('/order', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) return showFB(data.detail || 'Order rejected', 'err');
+    const msg = data.trades_executed > 0
+      ? `✓ ${data.trades_executed} trade(s) executed  ·  ID: ${data.order_id}`
+      : `✓ Order resting in book  ·  ID: ${data.order_id}`;
+    showFB(msg, 'ok');
+  } catch(_) {
+    showFB('Network error — is the server running?', 'err');
+  }
+}
+
+function showFB(msg, type) {
+  const el = document.getElementById('fb');
+  el.textContent = msg;
+  el.className = `feedback ${type} show`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+/* ── SYMBOL SWITCH ── */
+document.getElementById('symSel').addEventListener('change', e => {
+  sym = e.target.value;
+  set('symbolTag', sym);
+  lastMid = null; lastBestBid = null; lastBestAsk = null;
+  tapeCount = 0;
+  document.getElementById('tapeBody').innerHTML = '<div class="tape-empty" id="tapeEmpty"><div class="tape-empty-icon">⏳</div><div class="tape-empty-text">Loading recent trades…</div></div>';
+  set('tapeBadge', '0 trades');
+  document.getElementById('asksWrap').innerHTML = '';
+  document.getElementById('bidsWrap').innerHTML = '';
+  set('navPrice', '—'); set('navDelta', '');
+  document.getElementById('navPrice').className = 'nav-price';
+  document.getElementById('navDelta').className = 'nav-delta';
+  connect(sym);
+});
+
+/* ── CLOCK ── */
+function tick() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+setInterval(tick, 1000); tick();
+
+/* ── KEYBOARD ── */
+document.addEventListener('keydown', e => {
+  if (e.key==='Enter' && ['fPrice','fQty'].includes(e.target.id)) placeOrder();
+});
+
+/* ── HELPERS ── */
+function fmtP(v) {
+  if (v == null) return '—';
+  return parseFloat(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtNs(ns) {
+  if (ns == null) return '—';
+  const n = parseFloat(ns);
+  if (isNaN(n)) return '—';
+  if (n < 1000)       return `<span>${Math.round(n)}</span><span class="lat-unit">ns</span>`;
+  if (n < 1_000_000)  return `<span>${(n/1000).toFixed(1)}</span><span class="lat-unit">µs</span>`;
+  return `<span>${(n/1_000_000).toFixed(2)}</span><span class="lat-unit">ms</span>`;
+}
+function set(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = val;
+}
+
+/* ── BOOT ── */
+connect(sym);
+</script>
+</body>
+</html>

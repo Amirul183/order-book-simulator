@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "orderbook-simulator"
+version = "1.0.0"
+description = "High-performance in-memory limit order book and matching engine with a live WebSocket dashboard"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["order book", "matching engine", "trading", "finance", "market microstructure"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "sortedcontainers>=2.4.0",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.0.0",
+    "websockets>=12.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",      # for testing FastAPI endpoints
+    "ruff>=0.4.0",        # linter
+    "mypy>=1.10.0",       # type checker
+]
+
+[project.scripts]
+orderbook-sim = "simulator:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/orderbook-simulator"
+Repository = "https://github.com/yourusername/orderbook-simulator"
+Issues = "https://github.com/yourusername/orderbook-simulator/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "api*", "feeds*", "analytics*"]
+
+# ----------------------------------------------------------------
+# Ruff — fast Python linter (replaces flake8 + isort)
+# ----------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]   # line length handled by formatter
+
+[tool.ruff.isort]
+known-first-party = ["core", "api", "feeds", "analytics"]
+
+# ----------------------------------------------------------------
+# Pytest
+# ----------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+
+# ----------------------------------------------------------------
+# Mypy
+# ----------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+strict = false
